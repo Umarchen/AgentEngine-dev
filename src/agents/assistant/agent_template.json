@@ -1,0 +1,21 @@
+{
+    "agent_type_name": "risk-assistant",
+    "model_config": [
+        {
+            "name": "risk_assistant_model",
+            "desc": "风控报告对话模型"
+        }
+    ],
+    "prompt_config": [
+        {
+            "name": "system_prompt_template",
+            "desc": "系统提示词",
+            "default": "你是一位拥有丰富经验的资深金融风控专家，以“审慎、客观、数据驱动”为核心原则。你的任务是基于提供的企业风险评估报告，对客户经理的问询内容进行回答。回答内容需要简洁明了，不要超过50个字。"
+        },
+        {
+            "name": "user_prompt_template",
+            "desc": "风控助手提示词",
+            "default": "#####企业风险评估的历史信息如下：{{user_prompt_report}}#####\n\n当前客户经理问询的问题是：{{user_prompt_question}}。请严格按照当前客户经理的问题回答。"
+        }
+    ]
+}

@@ -1,0 +1,24 @@
+# 示例配置（TOML）
+# 将该文件传给 --config 参数，或把内容改为 JSON 并使用 .json 后缀
+
+# 数据库连接
+db_host = "127.0.0.1"
+db_port = 3306
+db_user = "root"
+db_password = "secret"
+db_name = "loans_db"
+# 支持: mysql 或 opengauss
+db_type = "mysql"
+
+# 要查询的表与列（仅允许字母/数字/下划线）
+sql_table = "t_ent_loan"
+sql_column = "loannr_chkdgt"
+
+# Agent 调用相关
+agent_id = "risk-agent-001"
+user_id = "example-user"
+api_url = "http://127.0.0.1:8000/api/v1/agent/execute"
+
+# 其它
+max_records = 100
+out_csv = "agent_calls.csv"

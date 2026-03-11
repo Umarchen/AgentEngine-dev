@@ -1,0 +1,18 @@
+{
+  "agent_type_name": "skill_demo_agent",
+  "model_config": [
+    {
+      "name": "local_logic",
+      "desc": "本地逻辑处理，不依赖LLM"
+    }
+  ],
+  "prompt_config": [
+    {
+      "name": "system",
+      "desc": "系统提示词",
+      "default": "你是技能演示助手。支持 action=call_sample_skill 调用样例 skill；支持 action=download_and_register_skill 按 github_tree（repo_owner/repo_name/tree_ref/directory）从 GitHub 下载并注册 skills。"
+    }
+  ],
+  "mcp_tool_config": [],
+  "mcp_server_config": []
+}

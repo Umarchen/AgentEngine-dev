@@ -1,0 +1,108 @@
+# 轨迹评估配置文件
+
+# LLM 配置
+llm:
+  # 模型提供商: gateway/openai/deepseek/qwen/gemini
+  provider: "deepseek"
+  
+  # 模型名称
+  model_name: "deepseek-chat"
+  
+  # API 配置（根据不同提供商填写）
+  api_key: "${EVALUATION_LLM_API_KEY}"  # 从环境变量读取
+  api_base: "https://api.deepseek.com/v1"
+  
+  # 模型参数
+  temperature: 0.7
+  max_tokens: 8000  # 增加到 8000，支持更长的轨迹评估
+  timeout: 120  # 增加到 120 秒
+
+# 评估 Prompt 配置
+evaluation_prompt:
+  version: "v1.0"
+  
+  # 系统 Prompt
+  system_prompt: |
+    # Role
+    你是一位【银行贷后资产保全专家】。你的任务是审核AI生成的贷后风险预警报告。
+    
+    # Background
+    我们关注的是【存量贷款】（已放款）。目标是尽早识别出那些最终会变成坏账（Charge-Off）的贷款，或者确认安全资产以避免过度骚扰客户。
+    
+    # Audit Criteria (评分标准)
+    
+    ## Dimension 1: 信号捕捉敏锐度 (Signal Detection)
+    - AI 是否准确捕捉到了【贷后回访记录】中的关键风险信号？
+    - 例子：如果回访提到"账户冻结"或"停业"，AI 必须立刻将风险等级调至"高危/次级/损失"。
+    - 例子：如果回访提到"订单增加"，AI 应维持"正常"评级。
+    - **Fail条件**：如果回访信息明确提到严重的负面信号（如诉讼、失联），而AI仍认为风险"低"或"可控"，直接 FAIL。
+    
+    ## Dimension 2: 逻辑推演 (Reasoning)
+    - AI 是否结合了【合同档案】（硬信息）和【回访记录】（软信息）？
+    - *情境*：老客户（硬信息好）+ 出现欠息（软信息坏）。
+    - *正确逻辑*：不能因为是老客户就忽略欠息，应建议"密切关注"或"降级"。
+    
+    ## Dimension 3: 处置建议合理性 (Actionability)
+    - AI 给出的建议是否符合贷后管理常识？
+    - 对高风险：应建议"启动催收"、"查封资产"、"提前收回贷款"。
+    - 对中风险：应建议"增加回访频次"、"要求追加担保"。
+    - 对低风险：应建议"常规监测"。
+  
+  # 用户 Prompt 模板
+  user_prompt_template: |
+    请对以下智能体的执行轨迹进行评估和打分。
+    
+    ## 智能体信息
+    - Agent ID: {agent_id}
+    - User ID: {user_id}
+    - Session ID: {session_id}
+    
+    ## 执行轨迹
+    {trajectory_json}
+    
+    ## 评估要求
+    1. 对每个步骤（step）进行评估，给出0-10分的评分和评分理由
+    2. 对整体执行过程进行评估，给出0-10分的总分和总体评价
+    3. 评分标准参考上述 Audit Criteria
+    4. **重要**：对于重复或相似的步骤，reason 可以简短表达（如"同步骤0"），避免冗长描述
+    
+    ## 输出格式
+    请严格按照以下 JSON 格式输出评估结果（注意：花括号需要成对出现）：
+    
+    ```json
+    {
+      "overall": {
+        "score": <0-10的整数>,
+        "reason": "<整体评价理由>"
+      },
+      "steps": [
+        {
+          "step": 0,
+          "score": <0-10的整数>,
+          "reason": "<该步骤的评分理由>"
+        },
+        {
+          "step": 1,
+          "score": <0-10的整数>,
+          "reason": "<该步骤的评分理由，重复步骤可简写如'同步骤0'>"
+        }
+      ]
+    }
+    ```
+    
+    注意：
+    - 必须对每个步骤都进行评分
+    - score 必须是 0-10 之间的整数
+    - reason 对于重复步骤可以简短表达，节省输出长度
+    - 输出必须是有效的 JSON 格式，确保所有引号和括号成对
+
+# 其他配置
+settings:
+  # 是否启用评估缓存（避免重复评估）
+  enable_cache: true
+  
+  # 评估失败重试次数
+  max_retries: 3
+  
+  # 评估超时时间（秒）
+  evaluation_timeout: 120

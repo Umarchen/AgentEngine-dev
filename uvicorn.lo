@@ -1,0 +1,34 @@
+2026-01-26 17:00:52.104 | INFO     | src.core.base:decorator:48 - Agent类型 'echo' 注册成功: EchoAgent
+2026-01-26 17:00:52.104 | INFO     | src.core.base:decorator:48 - Agent类型 'risk-assessment' 注册成功: RiskAssessmentAgent
+INFO:     Started server process [15164]
+INFO:     Waiting for application startup.
+2026-01-26 17:00:52.111 | INFO     | src.app:lifespan:31 - 正在启动 Agent Engine 服务...
+2026-01-26 17:00:52.111 | INFO     | src.app:lifespan:35 - 初始化数据库连接...
+2026-01-26 17:00:52.111 | INFO     | src.database.database:connect:69 - 正在连接数据库: sqlite+aiosqlite:///:memory:
+2026-01-26 17:00:52.122 | INFO     | src.database.database:connect:105 - 数据库连接成功
+2026-01-26 17:00:52.122 | INFO     | src.app:lifespan:39 - 初始化配置管理器...
+2026-01-26 17:00:52.122 | INFO     | src.core.config_manager:initialize:63 - 正在从数据库加载 Agent 配置...
+2026-01-26 17:00:52.122 | DEBUG    | src.database.database:get_all_agent_configs:190 - 从数据库获取所有Agent配置
+2026-01-26 17:00:52.124 | INFO     | src.database.database:_process_write_queue:453 - 数据库写入队列处理任务已启动
+2026-01-26 17:00:52.125 | INFO     | src.core.config_manager:initialize:77 - Agent 配置加载完成，共 0 个配置
+2026-01-26 17:00:52.125 | INFO     | src.app:lifespan:43 - 初始化 Agent 管理器...
+2026-01-26 17:00:52.125 | INFO     | src.core.agent_manager:__init__:61 - Agent 管理器初始化完成
+2026-01-26 17:00:52.125 | INFO     | src.app:lifespan:47 - 启动健康状态上报服务...
+2026-01-26 17:00:52.125 | INFO     | src.services.health_reporter:__init__:45 - 健康状态上报器初始化完成，上报间隔: 60秒
+2026-01-26 17:00:52.125 | INFO     | src.services.health_reporter:start:77 - 健康状态上报服务已启动
+2026-01-26 17:00:52.125 | INFO     | src.app:lifespan:54 - Agent Engine 服务启动完成!
+2026-01-26 17:00:52.125 | INFO     | src.services.health_reporter:_report_loop:98 - 健康状态上报循环开始
+2026-01-26 17:00:52.125 | DEBUG    | src.services.health_reporter:_do_report:121 - 当前没有活跃的 Agent，跳过上报
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+2026-01-26 17:01:52.125 | DEBUG    | src.services.health_reporter:_do_report:121 - 当前没有活跃的 Agent，跳过上报
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2026-01-26 17:02:15.176 | INFO     | src.app:lifespan:63 - 正在关闭 Agent Engine 服务...
+2026-01-26 17:02:15.176 | INFO     | src.services.health_reporter:_report_loop:112 - 健康状态上报循环结束
+2026-01-26 17:02:15.176 | INFO     | src.services.health_reporter:stop:94 - 健康状态上报服务已停止
+2026-01-26 17:02:15.177 | INFO     | src.core.agent_manager:stop_all_agents:480 - 已停止 0 个 Agent
+2026-01-26 17:02:15.177 | INFO     | src.database.database:_process_write_queue:470 - 数据库写入队列处理任务已停止
+2026-01-26 17:02:15.179 | INFO     | src.app:lifespan:77 - Agent Engine 服务已关闭
+INFO:     Application shutdown complete.
+INFO:     Finished server process [15164]

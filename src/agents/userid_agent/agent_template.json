@@ -1,0 +1,18 @@
+{
+    "agent_type_name": "userid_agent",
+    "model_config": [
+        {
+            "name": "userid_main_model",
+            "desc": "Userid 主模型 (支持userid鉴权)"
+        }
+    ],
+    "prompt_config": [
+        {
+            "name": "system",
+            "desc": "系统提示词",
+            "default": "你是一个智能助手。"
+        }
+    ],
+    "mcp_tool_config": [],
+    "mcp_server_config": []
+}

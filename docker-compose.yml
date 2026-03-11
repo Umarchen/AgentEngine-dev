@@ -1,0 +1,55 @@
+services:
+  agent-engine:
+    # --- Build 配置：处理代理继承 ---
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - http_proxy=${http_proxy}
+        - https_proxy=${https_proxy}
+        - no_proxy=${no_proxy}
+    
+    image: agent-engine-service:1.0.0
+    container_name: agent-engine
+    
+    # --- 端口映射 ---
+    ports:
+      - "18001:8000"
+
+    # --- 网络配置 ---
+    # 注意：不能使用 network_mode，应使用 networks 挂载到下方定义的桥接网络
+    networks:
+      agent-engine-network:
+        ipv4_address: 192.168.201.10  # (可选) 为容器指定固定 IP
+
+    # --- 目录挂载：同步当前代码 ---
+    volumes:
+      - .:/workspace
+    
+    # 保持容器运行以便调试
+    #command: sleep infinity
+
+    # --- 环境参数 ---
+    environment:
+      # 注意：由于使用了 Bridge 网络，若 MySQL 在宿主机，请确保 100.100.135.210 可从 192.168.201.0 网段访问
+      - DATABASE_URL=mysql+aiomysql://root:Huawei%40123@100.100.135.210:3306/agent_engine
+      - HOST=0.0.0.0
+      - PORT=8000
+      - WORKERS=1
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      - PYTHONPATH=/workspace
+      - PYTHONUNBUFFERED=1
+      # - http_proxy=${http_proxy}
+      # - https_proxy=${https_proxy}
+
+    restart: unless-stopped
+
+# --- 自定义网段配置 ---
+networks:
+  agent-engine-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.201.0/24  # 定义子网
+          gateway: 192.168.201.1    # 定义网关
