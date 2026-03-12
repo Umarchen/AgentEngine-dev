@@ -1,0 +1,16 @@
+# 暂存区与指纹文件
+.staging/
+*.sha256
+
+# Node modules (if any)
+node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
