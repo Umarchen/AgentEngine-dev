@@ -143,3 +143,5 @@ uvicorn.pid
 uvicorn.pid
 
 .codemate
+.staging/
+*.sha256

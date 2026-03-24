@@ -1,6 +1,7 @@
 """
 Agent 配置信息管理模块
 负责管理 Agent 配置信息的缓存和获取
+集成 Redis 缓存支持
 """
 
 import asyncio
@@ -9,36 +10,56 @@ from loguru import logger
 
 from src.models.schemas import AgentConfig
 from src.database.database import DatabaseManager, get_database_manager
+from src.cache import (
+    CacheManager,
+    CacheKeyBuilder,
+    CacheTTL,
+    get_cache_manager,
+)
 
 
 class AgentConfigManager:
     """
     Agent 配置信息管理器
     负责：
-    1. 从数据库加载配置到本地缓存
-    2. 提供配置的快速查询
+    1. 从数据库加载配置
+    2. 提供配置的快速查询（优先从 Redis 缓存）
     3. 配置的增删改查
+    4. 缓存一致性保证
     """
     
     _instance: Optional["AgentConfigManager"] = None
     
-    def __init__(self, db_manager: Optional[DatabaseManager] = None):
+    def __init__(
+        self,
+        db_manager: Optional[DatabaseManager] = None,
+        cache_manager: Optional[CacheManager] = None
+    ):
         """
         初始化配置管理器
         
         Args:
             db_manager: 数据库管理器实例
+            cache_manager: 缓存管理器实例（可选）
         """
         self._db_manager = db_manager or get_database_manager()
-        self._config_cache: Dict[str, AgentConfig] = {}
+        self._cache_manager = cache_manager or get_cache_manager()
+        self._config_cache: Dict[str, AgentConfig] = {}  # 本地缓存（可选）
         self._initialized = False
         self._lock = asyncio.Lock()
         
+        # 是否启用 Redis 缓存
+        self._use_redis_cache = self._cache_manager is not None
+        
     @classmethod
-    def get_instance(cls, db_manager: Optional[DatabaseManager] = None) -> "AgentConfigManager":
+    def get_instance(
+        cls,
+        db_manager: Optional[DatabaseManager] = None,
+        cache_manager: Optional[CacheManager] = None
+    ) -> "AgentConfigManager":
         """获取配置管理器单例"""
         if cls._instance is None:
-            cls._instance = cls(db_manager)
+            cls._instance = cls(db_manager, cache_manager)
         return cls._instance
     
     @classmethod
@@ -91,7 +112,7 @@ class AgentConfigManager:
     async def get_config(self, agent_id: str) -> Optional[AgentConfig]:
         """
         获取 Agent 配置
-        优先从缓存获取，缓存未命中则从数据库获取
+        优先从 Redis 缓存获取，缓存未命中则从数据库获取（Read-Through 策略）
         
         Args:
             agent_id: Agent 包ID
@@ -99,17 +120,34 @@ class AgentConfigManager:
         Returns:
             Agent 配置，如果不存在则返回 None
         """
-        # 先从缓存获取
+        # 1. 尝试从 Redis 缓存获取（如果启用）
+        if self._use_redis_cache:
+            cache_key = CacheKeyBuilder.agent_config(agent_id)
+            
+            config = await self._cache_manager.get_with_fallback(
+                key=cache_key,
+                loader=lambda: self._db_manager.get_agent_config(agent_id),
+                ttl=CacheTTL.AGENT_CONFIG,
+                model_class=AgentConfig,
+                cache_type="agent_config"
+            )
+            
+            if config:
+                # 同步到本地缓存（可选）
+                self._config_cache[agent_id] = config
+                return config
+        
+        # 2. Redis 未启用或缓存未命中，从本地缓存获取
         if agent_id in self._config_cache:
-            logger.debug(f"从缓存获取配置: {agent_id}")
+            logger.debug(f"从本地缓存获取配置: {agent_id}")
             return self._config_cache[agent_id]
         
-        # 缓存未命中，从数据库获取
+        # 3. 本地缓存也未命中，从数据库获取
         logger.debug(f"缓存未命中，从数据库获取配置: {agent_id}")
         config = await self._db_manager.get_agent_config(agent_id)
         
         if config:
-            # 更新缓存
+            # 更新本地缓存
             self._config_cache[agent_id] = config
             logger.debug(f"配置已加载到缓存: {agent_id}")
         else:
@@ -160,13 +198,19 @@ class AgentConfigManager:
             是否成功
         """
         try:
-            # 保存到数据库
+            # 1. 保存到数据库
             success = await self._db_manager.save_agent_config(config)
             
             if success:
-                # 更新缓存
+                # 2. 更新本地缓存
                 self._config_cache[config.agent_id] = config
                 logger.info(f"配置已添加/更新: {config.agent_id}")
+                
+                # 3. 失效 Redis 缓存（保证一致性）
+                if self._use_redis_cache:
+                    cache_key = CacheKeyBuilder.agent_config(config.agent_id)
+                    await self._cache_manager.delete(cache_key, cache_type="agent_config")
+                    logger.debug(f"已失效 Redis 缓存: {config.agent_id}")
             
             return success
         except Exception as e:
@@ -184,10 +228,16 @@ class AgentConfigManager:
             是否成功
         """
         try:
-            # 从缓存移除
+            # 1. 从本地缓存移除
             if agent_id in self._config_cache:
                 del self._config_cache[agent_id]
-                logger.info(f"配置已从缓存移除: {agent_id}")
+                logger.info(f"配置已从本地缓存移除: {agent_id}")
+            
+            # 2. 失效 Redis 缓存
+            if self._use_redis_cache:
+                cache_key = CacheKeyBuilder.agent_config(agent_id)
+                await self._cache_manager.delete(cache_key, cache_type="agent_config")
+                logger.debug(f"已失效 Redis 缓存: {agent_id}")
             
             # TODO: 从数据库移除
             return True
@@ -206,7 +256,13 @@ class AgentConfigManager:
             刷新后的配置
         """
         try:
-            # 从数据库获取最新配置
+            # 1. 失效 Redis 缓存
+            if self._use_redis_cache:
+                cache_key = CacheKeyBuilder.agent_config(agent_id)
+                await self._cache_manager.delete(cache_key, cache_type="agent_config")
+                logger.debug(f"已失效 Redis 缓存: {agent_id}")
+            
+            # 2. 从数据库获取最新配置
             config = await self._db_manager.get_agent_config(agent_id)
             
             if config:
@@ -275,12 +331,16 @@ def get_config_manager() -> AgentConfigManager:
     return _config_manager
 
 
-async def init_config_manager(db_manager: Optional[DatabaseManager] = None) -> AgentConfigManager:
+async def init_config_manager(
+    db_manager: Optional[DatabaseManager] = None,
+    cache_manager: Optional[CacheManager] = None
+) -> AgentConfigManager:
     """
     初始化配置管理器
     
     Args:
         db_manager: 可选的数据库管理器实例
+        cache_manager: 可选的缓存管理器实例
         
     Returns:
         配置管理器实例
@@ -288,6 +348,6 @@ async def init_config_manager(db_manager: Optional[DatabaseManager] = None) -> A
     # Use the class-level factory to ensure the class-level singleton is set
     # and the module-level reference stays in sync.
     global _config_manager
-    _config_manager = AgentConfigManager.get_instance(db_manager)
+    _config_manager = AgentConfigManager.get_instance(db_manager, cache_manager)
     await _config_manager.initialize()
     return _config_manager

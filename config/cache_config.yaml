@@ -1,0 +1,64 @@
+# Redis 缓存配置示例
+
+# Redis 连接配置
+redis:
+  # 单机模式
+  host: "127.0.0.1"
+  port: 6379
+  db: 0
+  password: ""  # 可选
+  
+  # 连接池配置
+  max_connections: 50
+  socket_timeout: 5  # 秒
+  socket_connect_timeout: 3  # 秒
+  retry_on_timeout: true
+  decode_responses: true
+  
+  # 哨兵模式（生产环境）
+  sentinel:
+    enabled: false
+    master_name: "mymaster"
+    sentinels:
+      - "redis-sentinel-1:26379"
+      - "redis-sentinel-2:26379"
+      - "redis-sentinel-3:26379"
+
+# 缓存配置
+cache:
+  # 是否启用缓存
+  enabled: true
+  
+  # 序列化配置
+  serializer:
+    type: "json"  # json | pickle
+    # 警告：启用 pickle 存在安全风险
+    enable_pickle: false
+  
+  # 缓存键配置
+  key:
+    prefix: "agent_engine"
+    max_length: 1024  # 1KB
+    url_encode: true
+  
+  # TTL 配置（秒）
+  ttl:
+    agent_config: 3600         # 1 小时
+    agent_template: 86400      # 24 小时
+    session_history: 1800      # 30 分钟
+    skill_info: 3600           # 1 小时
+    evaluation_result: 604800  # 7 天
+    agent_type: 86400          # 24 小时
+    null_value: 300            # 空值缓存 5 分钟
+    jitter_percent: 10         # TTL 随机偏移 ±10%
+  
+  # 降级配置
+  degradation:
+    enabled: true
+    timeout_seconds: 3
+    max_retries: 3
+  
+  # 监控配置
+  metrics:
+    enabled: true
+    collect_interval_seconds: 60
