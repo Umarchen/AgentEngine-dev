@@ -1,7 +1,7 @@
 """
-Agent 配置信息管理模块
+Agent 配置信息管理模块（增强版）
 负责管理 Agent 配置信息的缓存和获取
-集成 Redis 缓存支持
+集成 Redis 缓存支持、缓存一致性保证
 """
 
 import asyncio
@@ -20,12 +20,17 @@ from src.cache import (
 
 class AgentConfigManager:
     """
-    Agent 配置信息管理器
+    Agent 配置信息管理器（增强版）
+    
     负责：
     1. 从数据库加载配置
-    2. 提供配置的快速查询（优先从 Redis 缓存）
+    2. 提供配置的快速查询（多级缓存：L1 本地 + L2 Redis）
     3. 配置的增删改查
-    4. 缓存一致性保证
+    4. 缓存一致性保证（通过 CacheInvalidator）
+    
+    对应需求：
+    - [REQ_REDIS_CACHE_001] 缓存一致性保障（增强/修复）
+    - [REQ_REDIS_CACHE_008] 配置删除功能修复（修复）
     """
     
     _instance: Optional["AgentConfigManager"] = None
@@ -33,7 +38,8 @@ class AgentConfigManager:
     def __init__(
         self,
         db_manager: Optional[DatabaseManager] = None,
-        cache_manager: Optional[CacheManager] = None
+        cache_manager: Optional[CacheManager] = None,
+        cache_invalidator: Optional[Any] = None  # CacheInvalidator 实例
     ):
         """
         初始化配置管理器
@@ -41,10 +47,12 @@ class AgentConfigManager:
         Args:
             db_manager: 数据库管理器实例
             cache_manager: 缓存管理器实例（可选）
+            cache_invalidator: 缓存失效广播器实例（可选）
         """
         self._db_manager = db_manager or get_database_manager()
         self._cache_manager = cache_manager or get_cache_manager()
-        self._config_cache: Dict[str, AgentConfig] = {}  # 本地缓存（可选）
+        self._cache_invalidator = cache_invalidator
+        self._config_cache: Dict[str, AgentConfig] = {}  # 本地缓存（L1）
         self._initialized = False
         self._lock = asyncio.Lock()
         
@@ -55,11 +63,12 @@ class AgentConfigManager:
     def get_instance(
         cls,
         db_manager: Optional[DatabaseManager] = None,
-        cache_manager: Optional[CacheManager] = None
+        cache_manager: Optional[CacheManager] = None,
+        cache_invalidator: Optional[Any] = None
     ) -> "AgentConfigManager":
         """获取配置管理器单例"""
         if cls._instance is None:
-            cls._instance = cls(db_manager, cache_manager)
+            cls._instance = cls(db_manager, cache_manager, cache_invalidator)
         return cls._instance
     
     @classmethod
@@ -190,6 +199,7 @@ class AgentConfigManager:
     async def add_config(self, config: AgentConfig) -> bool:
         """
         添加或更新 Agent 配置
+        更新流程：数据库 -> 删除 Redis -> 删除本地缓存 -> 广播失效
         
         Args:
             config: Agent 配置信息
@@ -202,15 +212,18 @@ class AgentConfigManager:
             success = await self._db_manager.save_agent_config(config)
             
             if success:
-                # 2. 更新本地缓存
-                self._config_cache[config.agent_id] = config
-                logger.info(f"配置已添加/更新: {config.agent_id}")
-                
-                # 3. 失效 Redis 缓存（保证一致性）
+                # 2. 删除 Redis 缓存（保证一致性）
                 if self._use_redis_cache:
                     cache_key = CacheKeyBuilder.agent_config(config.agent_id)
                     await self._cache_manager.delete(cache_key, cache_type="agent_config")
                     logger.debug(f"已失效 Redis 缓存: {config.agent_id}")
+                
+                # 3. 更新本地缓存
+                self._config_cache[config.agent_id] = config
+                logger.info(f"配置已添加/更新: {config.agent_id}")
+                
+                # 4. 广播缓存失效消息（多实例一致性）
+                await self._broadcast_invalidation([config.agent_id])
             
             return success
         except Exception as e:
@@ -219,31 +232,104 @@ class AgentConfigManager:
     
     async def remove_config(self, agent_id: str) -> bool:
         """
-        移除 Agent 配置
+        移除 Agent 配置（已修复）
+        删除流程：数据库 -> 删除 Redis -> 删除本地缓存 -> 广播失效
         
         Args:
             agent_id: Agent 包ID
             
         Returns:
             是否成功
+            
+        对应需求：[REQ_REDIS_CACHE_008] 配置删除功能修复（修复）
         """
         try:
-            # 1. 从本地缓存移除
+            # 1. 从数据库删除（已修复）
+            db_success = await self._delete_from_database(agent_id)
+            
+            if not db_success:
+                logger.error(f"从数据库删除配置失败: {agent_id}")
+                return False
+            
+            # 2. 从本地缓存移除
             if agent_id in self._config_cache:
                 del self._config_cache[agent_id]
                 logger.info(f"配置已从本地缓存移除: {agent_id}")
             
-            # 2. 失效 Redis 缓存
+            # 3. 失效 Redis 缓存
             if self._use_redis_cache:
                 cache_key = CacheKeyBuilder.agent_config(agent_id)
                 await self._cache_manager.delete(cache_key, cache_type="agent_config")
                 logger.debug(f"已失效 Redis 缓存: {agent_id}")
             
-            # TODO: 从数据库移除
+            # 4. 广播缓存失效消息（多实例一致性）
+            await self._broadcast_invalidation([agent_id])
+            
+            logger.info(f"配置已完全移除: {agent_id}")
             return True
+            
         except Exception as e:
             logger.error(f"移除配置失败: {e}")
             return False
+    
+    async def _delete_from_database(self, agent_id: str) -> bool:
+        """
+        从数据库删除配置（使用事务保证原子性）
+        
+        Args:
+            agent_id: Agent ID
+            
+        Returns:
+            是否删除成功
+            
+        对应需求：[REQ_REDIS_CACHE_008] 配置删除功能修复（修复）
+        """
+        try:
+            # 使用数据库事务
+            async with self._db_manager.transaction():
+                # 删除配置记录
+                success = await self._db_manager.delete_agent_config(agent_id)
+                
+                if success:
+                    logger.info(f"已从数据库删除配置: {agent_id}")
+                    return True
+                else:
+                    logger.warning(f"配置在数据库中不存在: {agent_id}")
+                    return False
+        
+        except Exception as e:
+            logger.error(f"从数据库删除配置失败: {agent_id}, 错误: {e}")
+            return False
+    
+    async def _broadcast_invalidation(self, agent_ids: List[str]):
+        """
+        广播缓存失效消息
+        
+        Args:
+            agent_ids: 要失效的 Agent ID 列表
+            
+        对应需求：[REQ_REDIS_CACHE_001] 缓存一致性保障（增强/修复）
+        """
+        if self._cache_invalidator is None:
+            logger.debug("未配置缓存失效广播器，跳过广播")
+            return
+        
+        try:
+            # 构建缓存键列表
+            cache_keys = [
+                CacheKeyBuilder.agent_config(agent_id)
+                for agent_id in agent_ids
+            ]
+            
+            # 广播失效消息
+            await self._cache_invalidator.invalidate_keys(cache_keys)
+            
+            logger.info(
+                f"已广播缓存失效消息 - agent_ids: {len(agent_ids)}"
+            )
+        
+        except Exception as e:
+            logger.error(f"广播缓存失效消息失败: {e}")
     
     async def refresh_config(self, agent_id: str) -> Optional[AgentConfig]:
         """
@@ -273,6 +359,9 @@ class AgentConfigManager:
                 del self._config_cache[agent_id]
                 logger.warning(f"配置在数据库中不存在，已从缓存移除: {agent_id}")
             
+            # 3. 广播缓存失效消息
+            await self._broadcast_invalidation([agent_id])
+            
             return config
         except Exception as e:
             logger.error(f"刷新配置失败: {e}")
@@ -294,10 +383,79 @@ class AgentConfigManager:
                 self._config_cache[config.agent_id] = config
             
             logger.info(f"所有配置已刷新，共 {len(configs)} 个")
+            
+            # 广播全部失效
+            agent_ids = [config.agent_id for config in configs]
+            await self._broadcast_invalidation(agent_ids)
+            
             return len(configs)
         except Exception as e:
             logger.error(f"刷新所有配置失败: {e}")
             return 0
+    
+    # ==================== 批量操作（新增）====================
+    
+    async def get_configs_batch(
+        self,
+        agent_ids: List[str]
+    ) -> Dict[str, AgentConfig]:
+        """
+        批量获取配置
+        
+        Args:
+            agent_ids: Agent ID 列表
+            
+        Returns:
+            Agent ID -> AgentConfig 映射
+        """
+        result = {}
+        
+        if self._use_redis_cache:
+            # 使用批量获取接口
+            cache_keys = {
+                agent_id: CacheKeyBuilder.agent_config(agent_id)
+                for agent_id in agent_ids
+            }
+            
+            cache_values = await self._cache_manager.mget(
+                keys=list(cache_keys.values()),
+                model_class=AgentConfig,
+                cache_type="agent_config"
+            )
+            
+            # 映射回 agent_id
+            for agent_id, cache_key in cache_keys.items():
+                if cache_key in cache_values:
+                    result[agent_id] = cache_values[cache_key]
+        
+        # 补充未命中的配置
+        for agent_id in agent_ids:
+            if agent_id not in result:
+                config = await self.get_config(agent_id)
+                if config:
+                    result[agent_id] = config
+        
+        return result
+    
+    async def remove_configs_batch(
+        self,
+        agent_ids: List[str]
+    ) -> Dict[str, bool]:
+        """
+        批量删除配置
+        
+        Args:
+            agent_ids: Agent ID 列表
+            
+        Returns:
+            Agent ID -> 是否成功 映射
+        """
+        result = {}
+        
+        for agent_id in agent_ids:
+            result[agent_id] = await self.remove_config(agent_id)
+        
+        return result
     
     # ==================== 工具方法 ====================
     
@@ -314,6 +472,16 @@ class AgentConfigManager:
         self._config_cache.clear()
         self._initialized = False
         logger.info("配置缓存已清空")
+    
+    def set_cache_invalidator(self, cache_invalidator: Any):
+        """
+        设置缓存失效广播器
+        
+        Args:
+            cache_invalidator: CacheInvalidator 实例
+        """
+        self._cache_invalidator = cache_invalidator
+        logger.info("已设置缓存失效广播器")
 
 
 # 全局配置管理器实例获取函数
@@ -333,7 +501,8 @@ def get_config_manager() -> AgentConfigManager:
 
 async def init_config_manager(
     db_manager: Optional[DatabaseManager] = None,
-    cache_manager: Optional[CacheManager] = None
+    cache_manager: Optional[CacheManager] = None,
+    cache_invalidator: Optional[Any] = None
 ) -> AgentConfigManager:
     """
     初始化配置管理器
@@ -341,6 +510,7 @@ async def init_config_manager(
     Args:
         db_manager: 可选的数据库管理器实例
         cache_manager: 可选的缓存管理器实例
+        cache_invalidator: 可选的缓存失效广播器实例
         
     Returns:
         配置管理器实例
@@ -348,6 +518,8 @@ async def init_config_manager(
     # Use the class-level factory to ensure the class-level singleton is set
     # and the module-level reference stays in sync.
     global _config_manager
-    _config_manager = AgentConfigManager.get_instance(db_manager, cache_manager)
+    _config_manager = AgentConfigManager.get_instance(
+        db_manager, cache_manager, cache_invalidator
+    )
     await _config_manager.initialize()
     return _config_manager

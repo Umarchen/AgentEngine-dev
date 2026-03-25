@@ -1,10 +1,17 @@
-# Agent 核心模块
-from .base import AgentRegistry
-from .config_manager import AgentConfigManager
-from .agent_manager import AgentManager
+"""
+核心模块（增强版）
+导出所有核心相关的类和函数
+"""
+
+# 增强版配置管理器
+from .config_manager import (
+    AgentConfigManager,
+    get_config_manager,
+    init_config_manager
+)
 
 __all__ = [
-    "AgentRegistry",
     "AgentConfigManager",
-    "AgentManager",
+    "get_config_manager",
+    "init_config_manager",
 ]

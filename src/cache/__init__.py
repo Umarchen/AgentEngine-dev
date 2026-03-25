@@ -1,59 +1,58 @@
 """
-缓存模块
-提供 Redis 缓存功能
+缓存模块（增强版）
+导出所有缓存相关的类和函数
 """
 
-from .constants import (
-    CacheKeys,
-    CacheTTL,
-    CacheConfig,
-    CACHE_NAMESPACES,
-)
-from .key_builder import CacheKeyBuilder
-from .serializer import CacheSerializer, default_serializer
-from .redis_client import (
-    RedisClient,
-    RedisConfig,
-    get_redis_client,
-    close_redis_client,
-)
-from .cache_manager import (
-    CacheManager,
-    get_cache_manager,
-    set_cache_manager,
-)
-from .metrics import (
-    CacheMetrics,
-    MetricsContext,
-)
+# 现有模块
+from src.cache.redis_client import RedisClient
+from src.cache.serializer import CacheSerializer
+from src.cache.key_builder import CacheKeyBuilder
+from src.cache.metrics import CacheMetrics, MetricsContext
+from src.cache.constants import CacheConfig, CacheTTL
 
+# 新增模块（增强版）
+from .local_cache import LocalCache, LocalCacheStats, get_local_cache
+from .circuit_breaker import (
+    CircuitBreaker,
+    CircuitState,
+    CircuitBreakerOpenError,
+    CircuitBreakerStats
+)
+from .cache_invalidator import CacheInvalidator, get_cache_invalidator
+from .cache_warmer import CacheWarmer, CacheWarmerStats, get_cache_warmer
+
+# 增强版缓存管理器
+from .cache_manager import CacheManager, get_cache_manager, set_cache_manager
 
 __all__ = [
-    # 常量
-    "CacheKeys",
-    "CacheTTL",
-    "CacheConfig",
-    "CACHE_NAMESPACES",
-    
-    # 键构建器
-    "CacheKeyBuilder",
-    
-    # 序列化器
-    "CacheSerializer",
-    "default_serializer",
-    
-    # Redis 客户端
+    # 现有模块
     "RedisClient",
-    "RedisConfig",
-    "get_redis_client",
-    "close_redis_client",
+    "CacheSerializer",
+    "CacheKeyBuilder",
+    "CacheMetrics",
+    "MetricsContext",
+    "CacheConfig",
+    "CacheTTL",
     
-    # 缓存管理器
+    # 新增模块
+    "LocalCache",
+    "LocalCacheStats",
+    "get_local_cache",
+    
+    "CircuitBreaker",
+    "CircuitState",
+    "CircuitBreakerOpenError",
+    "CircuitBreakerStats",
+    
+    "CacheInvalidator",
+    "get_cache_invalidator",
+    
+    "CacheWarmer",
+    "CacheWarmerStats",
+    "get_cache_warmer",
+    
+    # 增强版
     "CacheManager",
     "get_cache_manager",
     "set_cache_manager",
-    
-    # 监控指标
-    "CacheMetrics",
-    "MetricsContext",
 ]
